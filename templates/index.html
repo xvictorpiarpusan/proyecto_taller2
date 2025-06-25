@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Control Robótico</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-6">
+  <div class="flex items-center mb-6 space-x-4">
+  <!-- Logo a la izquierda -->
+   <img src="{{ url_for('static', filename='logo.png') }}"
+       alt="Buggy Plant Logo"
+       class="h-24 w-auto" />
+  <!-- Título -->
+  <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
+    Contro Buggy Plant
+  </h1>
+</div>
+
+  <!-- INPUTS ORIENTACIÓN + PUNTOS -->
+  <div class="space-y-6 mb-8">
+    <!-- Orientación -->
+    <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+      <h2 class="text-2xl font-semibold mb-2 text-cyan-300">Orientación Inicial</h2>
+      <input id="heading0" type="number" value="0" placeholder="Heading (grados)"
+             class="w-full p-2 rounded bg-gray-700 focus:outline-none" />
+    </div>
+    <!-- Puntos A, B, C -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-semibold mb-2 text-cyan-300">Punto A</h2>
+        <div class="flex space-x-2">
+          <input id="Ax" type="number" value="30" placeholder="Ax"
+                 class="w-full p-2 rounded bg-gray-700 focus:outline-none" />
+          <input id="Ay" type="number" value="10" placeholder="Ay"
+                 class="w-full p-2 rounded bg-gray-700 focus:outline-none" />
+        </div>
+      </div>
+      <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-semibold mb-2 text-cyan-300">Punto B</h2>
+        <div class="flex space-x-2">
+          <input id="Bx" type="number" value="0" placeholder="Bx"
+                 class="w-full p-2 rounded bg-gray-700 focus:outline-none" />
+          <input id="By" type="number" value="60" placeholder="By"
+                 class="w-full p-2 rounded bg-gray-700 focus:outline-none" />
+        </div>
+      </div>
+      <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-semibold mb-2 text-cyan-300">Punto C</h2>
+        <div class="flex space-x-2">
+          <input id="Cx" type="number" value="40" placeholder="Cx"
+                 class="w-full p-2 rounded bg-gray-700 focus:outline-none" />
+          <input id="Cy" type="number" value="60" placeholder="Cy"
+                 class="w-full p-2 rounded bg-gray-700 focus:outline-none" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Botón -->
+    <button id="sendBtn"
+            class="w-full md:w-auto bg-cyan-500 hover:bg-cyan-600 px-6 py-3 rounded-lg font-bold transition">
+      🛰 Enviar Coordenadas
+    </button>
+  </div>
+
+  <!-- GRÁFICA + TERMINAL -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Gráfica -->
+    <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+      <div id="plot" style="height:400px; width:100%;"></div>
+    </div>
+    <!-- Terminal -->
+    <div class="bg-gray-800 p-4 rounded-lg shadow-lg flex flex-col">
+      <h2 class="text-2xl font-semibold mb-4 text-cyan-300">Terminal</h2>
+      <div id="terminal" class="bg-black bg-opacity-50 p-2 overflow-y-auto text-sm font-mono h-80">
+        <!-- Aquí irán los logs -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    // Función log para el terminal
+    const term = document.getElementById('terminal');
+    function log(msg) {
+      const line = document.createElement('div');
+      line.textContent = msg;
+      term.appendChild(line);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    // Configura la gráfica (ida / vuelta)
+    const layout = {
+      title: { text: 'Trayectoria del Robot', font: { color: '#fff' } },
+      plot_bgcolor:'rgba(0,0,0,0)', paper_bgcolor:'rgba(0,0,0,0)',
+      xaxis:{ color:'#fff', gridcolor:'rgba(255,255,255,0.2)', range:[0,200]},
+      yaxis:{ color:'#fff', gridcolor:'rgba(255,255,255,0.2)', range:[0,200]}
+    };
+    const plotDiv = document.getElementById('plot');
+    Plotly.newPlot(plotDiv, [
+      { x:[], y:[], mode:'lines+markers', line:{color:'#0f0'}, marker:{color:'#0f0'}, name:'Ida' },
+      { x:[], y:[], mode:'lines+markers', line:{color:'#ffa500'}, marker:{color:'#ffa500'}, name:'Vuelta' }
+    ], layout);
+
+    // Actualiza gráfica dividiendo en ida/vuelta
+    function updatePlot(pts) {
+      const C = { x:+Cx.value, y:+Cy.value };
+      let idx = pts.findIndex(p=>Math.hypot(p.x-C.x,p.y-C.y)<5);
+      if (idx<0) idx = pts.length;
+      const out = pts.slice(0,idx+1), ret = pts.slice(idx);
+      Plotly.update(plotDiv,
+        {
+          x:[ out.map(p=>p.x), ret.map(p=>p.x) ],
+          y:[ out.map(p=>p.y), ret.map(p=>p.y) ]
+        },
+        {}, [0,1]
+      );
+    }
+
+    // Polling de lecturas
+    let pollingId = null;
+    function startPolling() {
+      if (pollingId) return;
+      pollingId = setInterval(async()=>{
+        try {
+          const resp = await fetch('/readings');
+          const pts = await resp.json();
+          updatePlot(pts);
+        } catch(e) {
+          log('Error leyendo /readings: ' + e);
+        }
+      }, 500);
+    }
+      // 4) Polling de logs
+  let logsPolling = null;
+  function startLogPolling() {
+    if (logsPolling) return;
+    logsPolling = setInterval(async () => {
+      try {
+        const res = await fetch('/logs');
+        const lines = await res.json();
+        lines.forEach(l => log(l));
+      } catch (e) {
+        console.error('Error leyendo /logs:', e);
+      }
+    }, 200);
+  }
+
+    // Envío de coordenadas
+    sendBtn.addEventListener('click', async()=>{
+      term.innerHTML = '';
+      log('🏁 Iniciando envío de coordenadas');
+      const payload = {
+        heading0: +heading0.value,
+        A: { x:+Ax.value, y:+Ay.value },
+        B: { x:+Bx.value, y:+By.value },
+        C: { x:+Cx.value, y:+Cy.value }
+      };
+      try {
+        log('➡️ POST /send ' + JSON.stringify(payload));
+        const resp = await fetch('/send',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if (result.status==='started') {
+          log('✅ Coordenadas enviadas, arrancando seguimiento...');
+          startPolling();
+          startLogPolling();
+        } else {
+          log('❌ Error al enviar: ' + result.status);
+        }
+      } catch(e) {
+        log('❌ Falló fetch /send: ' + e);
+      }
+    });
+  });
+  </script>
+</body>
+</html>
